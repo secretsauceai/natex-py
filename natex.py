@@ -5,14 +5,28 @@ import os
 import sys
 import stanza
 import argparse
+import importlib
 import pydash as _
 import contextlib
 from dataclasses import dataclass
 
 STANZA_PROCESSORS = 'tokenize,pos,ner,lemma,depparse'
 
+def split_features(feature_string):
+	if feature_string:
+		obj = dict()
+		for features in feature_string.split('|'):
+			key, value = features.split('=')
+			obj[key.upper()] = value.upper()
+		return obj
+
 @dataclass
-class NatExToken:	
+class FromKw:
+	def __init__(self, **kwargs):
+		for arg, value in kwargs.items():
+			setattr(self, arg, value)
+
+class NatExToken(FromKw):	
 	SYMBOL_ORDER = ['', '@','#', '!']
 
 	def __repr__(self):
@@ -24,10 +38,10 @@ class NatExToken:
 			literal=token['text'],
 			lemma=_.get(token, 'lemma', ''),
 			upos=_.get(token, 'upos', '').upper(), 
-			xpos=_.get(token, 'xpos').upper(), 
+			xpos=_.get(token, 'xpos', '').upper(), 
 			udep=_.get(token, 'deprel', '').upper(),
 			span=span,
-			features=self.__split_features(_.get(token, 'feats', '')),
+			features=split_features(_.get(token, 'feats', '')),
 			is_token=True,
 			is_separator=False
 		)
@@ -95,8 +109,7 @@ class NatExToken:
 
 		return output
 
-@dataclass
-class NatExMatch:
+class NatExMatch(FromKw):
 	def __init__(self, **kwargs):
 		super().__init__(**kwargs)
 		self.match = self.original[slice(*self._span)]
@@ -107,8 +120,7 @@ class NatExMatch:
 	def span(self):
 		return tuple(self._span)
 
-@dataclass
-class NatExSeparator:
+class NatExSeparator(FromKw):
 	@staticmethod
 	def from_string(literal, index, span):
 		return NatExSeparator(index=index,
@@ -146,7 +158,7 @@ class NatEx:
 				separator_len = parsed_sentence.text[sentence_pos:].index(token['text'])
 				span = [sentence_pos, sentence_pos + separator_len]
 
-				parsed_separator = NatExSeparator.from_string(index, parsed_sentence.text, span)
+				parsed_separator = NatExSeparator.from_string(parsed_sentence.text, index, span)
 				sentence_pos += separator_len
 
 				self.separators.append(parsed_separator)
@@ -211,18 +223,10 @@ class NatEx:
 		return optionals
 
 	def __split_span(self, feature_string):
-		data = self.__split_features(feature_string)
+		data = split_features(feature_string)
 		span = data.values()
 		span = list(map(int, span))
 		return span
-
-	def __split_features(self, feature_string):
-		if feature_string:
-			obj = dict()
-			for features in feature_string.split('|'):
-				key, value = features.split('=')
-				obj[key.upper()] = value.upper()
-			return obj
 
 	def __to_regex(self, natex_string):
 		TAGS_REGEX = r'(?<!\\)[#@:!][^#@:!>]*'
@@ -295,6 +299,7 @@ class NatEx:
 	@staticmethod
 	def setup(language_code='en', verbose=True):
 		stanza.download(language_code, processors=STANZA_PROCESSORS, verbose=verbose)
+		importlib.reload(stanza)
 
 	def match(self, pattern, flags=0):
 		pattern = self.__to_regex(pattern)
@@ -339,7 +344,7 @@ def natex(sentence, language_code='en'):
 					needs_setup = True
 		
 		if needs_setup:
-			print('Download of stanza models necessary. This will only happen once…')
+			print('Download of stanza models necessary. You will have to re-run the script once the downloads are through.')
 			NatEx.setup(language_code)
 			return natex(sentence, language_code)
 
